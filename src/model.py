@@ -108,11 +108,22 @@ class FlexibleConsumerModel:
         #   a bound you want a dual for must be an explicit constraint, not lb=/ub= (see the README).
         # * naming the families "import", "export", "load", "pv" makes the standard plots of
         #   src/plotting.py work out of the box.
+        self.var["import"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="import")
+        self.var["export"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="export")
+        self.var["load"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="load")
+        self.var["pv"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="pv")
 
         # --- Objective ---------------------------------------------------------------
         # TODO: express the objective function and its direction (GRB.MINIMIZE or GRB.MAXIMIZE):
         #   m.setObjective(gp.quicksum(<expression in t> for t in T), <direction>)
         # The input-data attributes (with units) are documented in src/data_loader.py (InputData).
+        m.setObjective(gp.quicksum(
+            self.var["load"][t] * d.consumption_utility
+            - d.pv_marginal_cost * self.var["pv"][t]
+            + (d.energy_price[t] - d.export_tariff) * self.var["export"][t]
+            - (d.energy_price[t] + d.import_tariff) * self.var["import"][t]
+            for t in T
+        ), GRB.MAXIMIZE)
 
         # --- Constraints -------------------------------------------------------------
         # TODO: add the constraints of your formulation.
@@ -122,6 +133,14 @@ class FlexibleConsumerModel:
         #       (<lhs expression> - <rhs expression> <= 0 for t in T), name="<name>")
         # Pattern for a single constraint (dual returned as a scalar):
         #   self.con["<name>"] = m.addConstr(<lhs expression> - <rhs expression> <= 0, name="<name>")
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
+        self.con["pv_max"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_max")
+        self.con["balance"] = m.addConstrs(
+            (self.var["pv"][t] + self.var["import"][t]
+             == self.var["load"][t] + self.var["export"][t] for t in T),
+            name="balance",
+        )
 
         m.update()
         return self
