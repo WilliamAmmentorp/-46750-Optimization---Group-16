@@ -15,7 +15,7 @@ from pathlib import Path
 import matplotlib
 
 from src.data_loader import load_question, list_questions
-from src.model import FlexibleConsumerModel, LinearDisutilityModel, QuadraticDisutilityModel, Results
+from src.model import FlexibleConsumerModel, LinearDisutilityModel, QuadraticDisutilityModel,TemporalDisutilityModel, Results
 from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule
 from src.scenarios import scale_prices, scale_pv, set_tariffs
 

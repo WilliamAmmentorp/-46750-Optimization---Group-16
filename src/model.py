@@ -312,6 +312,66 @@ _STATUS = {
     GRB.NUMERIC: "NUMERIC", GRB.INTERRUPTED: "INTERRUPTED",
 }
 
+#Question 2e(ii) Temporal disutility function
+class TemporalDisutilityModel(FlexibleConsumerModel):
+    def build(self):
+        #Inputs for Gurobi model
+        d, m, T = self.data, self.m, self.T
+        temporal_disutility = 0.25
+        self.var["import"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="import")
+        self.var["export"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="export")
+        self.var["load"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="load")
+        self.var["pv"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="pv")
+
+        #d_t variable for disutility
+        #d_t = |L_t - L_ref_t|
+        self.var["abs_deviation"] = m.addVars(
+            T, lb=0, vtype=GRB.CONTINUOUS, name="abs_deviation"
+        )
+
+        #Shorter names for easier readability
+        L = self.var["load"]
+        PV = self.var["pv"]
+        imp = self.var["import"]
+        exp = self.var["export"]
+        dev = self.var["abs_deviation"]
+
+        #objective function with quadratic and temporal disutility
+        #Minimize electricity procurement cost and disutility from deviating from reference load
+        m.setObjective(
+            gp.quicksum(
+                (dev[t]**2) * d.quadratic_disutility
+                + d.pv_marginal_cost * PV[t]
+                + (d.energy_price[t] + d.import_tariff) * imp[t]
+                - (d.energy_price[t] - d.export_tariff) * exp[t]
+                for t in T
+            )
+            + gp.quicksum(
+                temporal_disutility * (dev[t]+dev[t-1])**2 for t in range(1, len(T))
+            ),
+            GRB.MINIMIZE,
+        )
+
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
+        self.con["pv_max"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_max")
+        self.con["balance"] = m.addConstrs(
+            (self.var["pv"][t] + self.var["import"][t]
+             == self.var["load"][t] + self.var["export"][t] for t in T),
+            name="balance",
+        )
+
+        #new disutility constraints
+        self.con["dev_above"] = m.addConstrs((dev[t] >= L[t] - d.reference_load[t] for t in T), name="dev_above")
+        self.con["dev_below"] = m.addConstrs((dev[t] >= d.reference_load[t] - L[t] for t in T), name="dev_below")
+        return self
+    
+
+_STATUS = {
+    GRB.OPTIMAL: "OPTIMAL", GRB.INFEASIBLE: "INFEASIBLE", GRB.UNBOUNDED: "UNBOUNDED",
+    GRB.INF_OR_UNBD: "INF_OR_UNBD", GRB.TIME_LIMIT: "TIME_LIMIT", GRB.SUBOPTIMAL: "SUBOPTIMAL",
+    GRB.NUMERIC: "NUMERIC", GRB.INTERRUPTED: "INTERRUPTED",
+}
 
 def _status_name(code: int) -> str:
     return _STATUS.get(code, f"STATUS_{code}")

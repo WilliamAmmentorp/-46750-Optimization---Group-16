@@ -1,0 +1,2 @@
+status    : OPTIMAL
+objective : 47.2497 DKK
