@@ -69,3 +69,18 @@ def set_load_preferences(
         load_min_kWh=data.load_min_kWh if load_min_kWh is None else load_min_kWh,
         min_daily_energy_kWh=data.min_daily_energy_kWh if min_daily_energy_kWh is None else min_daily_energy_kWh,
     )
+
+#Used to modify the linear disutility coefficient (DKK/kWh) in the InputData object and leaves the original intact
+def set_linear_disutility(data: InputData, linear_disutility: float) -> InputData:
+    """Override the linear disutility coefficient (DKK/kWh)."""
+    return replace(data, linear_disutility=linear_disutility)
+
+#Used to modify the quadratic disutility coefficient (DKK/kWh) in the InputData object and leaves the original intact
+def set_quadratic_disutility(data: InputData, quadratic_disutility: float) -> InputData:
+    """Override the quadratic disutility coefficient (DKK/kWh^2)."""
+    return replace(data, quadratic_disutility=quadratic_disutility)
+
+#Used to modify the energy price (DKK/kWh) in the InputData object and leaves the original intact
+def set_prices(data: InputData, energy_price: np.ndarray) -> InputData:
+    """Override the hourly energy price (DKK/kWh)."""
+    return replace(data, energy_price=np.asarray(energy_price, dtype=float))

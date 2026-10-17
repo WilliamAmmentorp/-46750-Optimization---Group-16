@@ -61,11 +61,17 @@ main.py                  Entry point: load data -> build model -> solve -> save 
 src/
   data_loader.py         load_question("Q1_caseA") -> InputData (all parameters, with units)
   model.py               FlexibleConsumerModel: build() / solve() -> Results (primal + dual values)
+                          - FlexibleConsumerModel
+                          - LinearDisutilityModel
+                          - QuadraticDisutilityModel
+                          - TemporalDisutilityModel
   scenarios.py           Helpers that derive sensitivity scenarios from a base InputData
   plotting.py            Figures for inputs, optimal schedule, duals and scenario comparisons
 data/
   appliance_params.json  SHARED catalogue: every PV system, flexible load and battery - see Section 4
   bus_params.json        SHARED grid connection: prices (both days) and tariffs
+  bus_params_alternating_prices.json  json file with alternating daily profile for 2e
+  bus_params_consecutive_prices.json  json file with consecutive daily profile for 2e
   params_Q1_caseA.json   One small file per case: composes a consumer from the catalogue
   params_Q1_caseB.json
   params_Q2_linear.json
@@ -73,8 +79,21 @@ data/
   params_Q3.json
   params_Q3_battery.json
 results/                 Written by main.py (git-ignored)
+  Q2_linear/
+  Q2_linear_sweep/
+  Q2_price_sweep/
+  Q2_quadratic/
+  Q2_quadratic_sweep/
+  Q2_temporal/
 requirements.txt, environment.yaml, LICENSE, .gitignore
 ```
+For Question 2, three disutility models are implemented in `src/model.py`:
+
+- `LinearDisutilityModel` implements the linear absolute-deviation disutility.
+- `QuadraticDisutilityModel` implements the quadratic disutility.
+- `TemporalDisutilityModel` implements the temporally coupled disutility.
+The sweep analyses and numerical experiments for Question 2 are implemented as seperate functions in `main.py`.
+Scenario help functions used to modifity the input data without changing the original base cases are located in `src/scenarios.py`
 
 The four modules mirror the workflow you are asked to implement and document: *data loading*,
 *model building*, *solving and extracting results*, *plotting*. Keep them separate as your code grows -
@@ -89,6 +108,69 @@ python main.py --question Q1_caseA              # base case
 python main.py --question Q1_caseA --scenarios  # + example sensitivity scenarios
 python main.py --show                           # open the figures in a window
 ```
+## 3.1 Question 2 experiments
+The models and sweep analysis used for Question 2 can be reproduced directly from `main.py`
+Each experiment writes its results and figures to the corresponding folder under `results/`
+
+### Linear disutility model
+The base case and the sweep for the linear model are run with:
+```bash
+python main.py --question Q2_linear
+python main.py --question Q2_linear_sweep
+```
+For the sweep, the following values are investigated: cL = {0.5, 1.0, 1.43, 2.0, 2.1, 3.5} DKK/kWh
+For every value, a modified copy of the base input data is created using `set_linear_disutility()` from `src/scenarios.py.`
+Results are written to `results/Q2_linear_sweep/`
+
+### Quadratic disutility model
+The base case and the sweep for the quadratic model are run with:
+```bash
+python main.py --question Q2_quadratic
+python main.py --question Q2_quadratic_sweep
+```
+For the sweep, the following values are investigated: cQ = {0.1, 0.5, 1.0, 2.0, 5.0, 10.0} DKK/kWh^2
+For every value, a modified copy of the base input data is created using `set_quadratic_disutility()` from `src/scenarios.py.`
+Results are written to `results/Q2_quadratic_sweep/`
+
+### Temporal disutility model
+The temporal model uses the input data from `Q2_quadratic` with cQ = 1.0 DKK/kWh^2 and the additional temporal disutility coefficient cT = 0.25 DKK/kWh^2.
+It is implemented in `TemporalDisutilityModel` and adds a penalty for consecutive deviations from the reference load profile.
+```bash
+python main.py --question Q2_temporal
+```
+Results are written to `results/Q2_temporal/`
+
+### Alternating and consecutive price experiment for all models
+The price profile for experiment from Q2e is run with:
+```bash
+python main.py --question Q2_price_sweep
+```
+Two electricity profiles are compared:
+Alternating prices between 1.0 and 2.0 DKK/kWh from hour to hour
+Consecutive prices where hours 0-5 have a price of 1.0 DKK/kWh, hours 6-17 have a price of 2.0 DKK/kWh, and hours 18-23 have a price of 1.0 DKK/kWh
+The two electricity profiles are applied to all three question 2 models:
+`LinearDisutilityModel`
+`QuadraticDisutilityModel`
+`TemporalDisutilityModel`
+This produces 6 runs in total. The price profile is changed using `set_prices()` from `src/scenarios.py`
+Results and figures are written to `results/Q2_price_sweep/`
+
+## 3.2 Question 2 scenario helpers
+
+The following helper functions were added to `src/scenarios.py` for the
+Question 2 sweep analyses:
+
+- `set_linear_disutility(data, linear_disutility)` returns a copy of the
+  input data with a modified linear disutility coefficient in DKK/kWh.
+
+- `set_quadratic_disutility(data, quadratic_disutility)` returns a copy of
+  the input data with a modified quadratic disutility coefficient in DKK/kWh^2.
+
+- `set_prices(data, energy_price)` returns a copy of the input data with a
+  modified 24-hour electricity-price profile in DKK/kWh.
+
+These functions allow the sweep analyses to be generated from the
+original base cases without modifying the base input data.
 
 **Use it from a notebook or your own script** (run from the repository root):
 ```python
@@ -197,6 +279,20 @@ choice of Question 3.(g) with a look-ahead (for instance a rolling-horizon or a 
 (`src/scenarios.py`) over editing the JSON files - it keeps the base case intact and the experiment
 reproducible. If you do add appliances or case files, follow the same structure (a new entry in the
 catalogue, a new `params_<case>.json`) and document them here.
+
+### Additional price profiles for Question 2e
+For the numerical experiment in Question 2e, two additional price-profile files were added.
+`bus_params_alternating_prices.json`
+: Contains a 24-hour electricity-price profile alternating between
+1.0 and 2.0 DKK/kWh. The profile contains 12 low-price and 12 high-price hours.
+
+`bus_params_consecutive_prices.json`
+: Contains the same 12 low-price and 12 high-price hours, but groups the
+high-price hours consecutively. Hours 0-5 use 1.0 DKK/kWh, hours 6-17 use
+2.0 DKK/kWh, and hours 18-23 use 1.0 DKK/kWh.
+
+Both profiles therefore have an average electricity price of 1.5 DKK/kWh.
+The files are used by `run_q2_price_sweep()` in `main.py` and applied to the normal `Q2_linear` and `Q2_quadratic` base cases through `set_prices()`
 
 ## 5. What is expected of your code
 

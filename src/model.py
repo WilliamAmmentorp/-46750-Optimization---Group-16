@@ -259,6 +259,7 @@ class QuadraticDisutilityModel(FlexibleConsumerModel):
     def build(self):
         #Inputs for Gurobi model
         d, m, T = self.data, self.m, self.T
+        
 
         self.var["import"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="import")
         self.var["export"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="export")
