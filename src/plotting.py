@@ -107,3 +107,38 @@ def plot_scenario_comparison(
     ax.set(ylabel=ylabel, title=f"Scenario comparison - {metric}")
     ax.tick_params(axis="x", rotation=20)
     return _finish(fig, save_to)
+
+
+def plot_sensitivity_results(
+    table,
+    experiments: dict,
+    out: Path,
+    filename_prefix: str,
+) -> None:
+    """Plot objective and import results for each sensitivity experiment."""
+    figure, axes = plt.subplots(
+        2,
+        len(experiments),
+        figsize=(5 * len(experiments), 7),
+        squeeze=False,
+        constrained_layout=True,
+    )
+    for column, (experiment, (title, base_value, _)) in enumerate(experiments.items()):
+        data = table[table["experiment"] == experiment]
+        axes[0, column].plot(data["parameter_value"], data["objective_DKK"], marker="o")
+        axes[1, column].plot(data["parameter_value"], data["import_kWh"], marker="o")
+        for row in range(2):
+            axes[row, column].axvline(
+                base_value,
+                color="red",
+                linestyle="--",
+                label="base",
+            )
+            axes[row, column].set_xlabel(title)
+            axes[row, column].set_title(experiment)
+            axes[row, column].legend()
+        axes[0, column].set_ylabel("objective [DKK]")
+        axes[1, column].set_ylabel("import [kWh]")
+
+    figure.savefig(out / f"{filename_prefix}.png", dpi=150)
+    plt.close(figure)

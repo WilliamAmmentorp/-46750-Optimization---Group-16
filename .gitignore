@@ -1,1 +1,8 @@
 venv/
+
+# Generated optimisation outputs
+results/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]

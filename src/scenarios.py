@@ -22,7 +22,7 @@ import numpy as np
 from .data_loader import InputData
 
 
-def scale_prices(data: InputData, factor: float, keep_mean: bool = False) -> InputData:
+def scale_prixces(data: InputData, factor: float, keep_mean: bool = False) -> InputData:
     """Multiply hourly prices by ``factor``. With ``keep_mean=True`` only the spread around the
     mean is scaled, which isolates the effect of price variability from the effect of price level."""
     p = data.energy_price
@@ -68,4 +68,32 @@ def set_load_preferences(
         load_max_kWh=data.load_max_kWh if load_max_kWh is None else load_max_kWh,
         load_min_kWh=data.load_min_kWh if load_min_kWh is None else load_min_kWh,
         min_daily_energy_kWh=data.min_daily_energy_kWh if min_daily_energy_kWh is None else min_daily_energy_kWh,
+    )
+
+
+#Used to modify the linear disutility coefficient (DKK/kWh) in the InputData object and leaves the original intact
+def set_linear_disutility(data: InputData, linear_disutility: float) -> InputData:
+    """Override the linear disutility coefficient (DKK/kWh)."""
+    return replace(data, linear_disutility=linear_disutility)
+
+#Used to modify the quadratic disutility coefficient (DKK/kWh) in the InputData object and leaves the original intact
+def set_quadratic_disutility(data: InputData, quadratic_disutility: float) -> InputData:
+    """Override the quadratic disutility coefficient (DKK/kWh^2)."""
+    return replace(data, quadratic_disutility=quadratic_disutility)
+
+#Used to modify the energy price (DKK/kWh) in the InputData object and leaves the original intact
+def set_prices(data: InputData, energy_price: np.ndarray) -> InputData:
+    """Override the hourly energy price (DKK/kWh)."""
+    return replace(data, energy_price=np.asarray(energy_price, dtype=float))
+
+def scale_quadratic_disutility(data: InputData, factor: float) -> InputData:
+    """Scale the quadratic preference for following the reference load."""
+    if data.quadratic_disutility is None:
+        raise ValueError("The input data has no quadratic disutility coefficient")
+    if factor < 0:
+        raise ValueError("The disutility scaling factor must be non-negative")
+
+    return replace(
+        data,
+        quadratic_disutility=data.quadratic_disutility * factor,
     )

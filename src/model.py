@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, Mapping
 
 import gurobipy as gp
 import numpy as np
@@ -92,31 +93,14 @@ class FlexibleConsumerModel:
         d, m, T = self.data, self.m, self.T
 
         # --- Decision variables --------------------------------------------------------
-        # TODO: identify and declare the decision variables of your formulation.
-        # Store every variable family in self.var["<name>"]: solve() then returns its hourly
-        # values automatically as a column of results.hourly.
-        # Pattern for hourly variables (one per hour):
-        #   self.var["<name>"] = m.addVars(T, lb=-GRB.INFINITY, vtype=GRB.CONTINUOUS, name="<name>")
-        # Pattern for a single (daily) variable:
-        #   self.var["<name>"] = m.addVar(lb=-GRB.INFINITY, vtype=GRB.CONTINUOUS, name="<name>")
-        # Notes:
-        # * gurobipy indexes the names automatically: name="<name>" in addVars(T, ...) creates
-        #   <name>[0], <name>[1], ..., <name>[23] - no need to build per-hour names yourself.
-        # * vtype: the same format takes GRB.BINARY or GRB.INTEGER if you ever need them (the
-        #   problem then becomes a MILP and dual values are no longer defined; solve() skips them).
-        # * lb defaults to 0 in gurobipy: a free variable needs an explicit lb=-GRB.INFINITY, and
-        #   a bound you want a dual for must be an explicit constraint, not lb=/ub= (see the README).
-        # * naming the families "import", "export", "load", "pv" makes the standard plots of
-        #   src/plotting.py work out of the box.
+
         self.var["import"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="import")
         self.var["export"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="export")
         self.var["load"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="load")
         self.var["pv"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="pv")
 
         # --- Objective ---------------------------------------------------------------
-        # TODO: express the objective function and its direction (GRB.MINIMIZE or GRB.MAXIMIZE):
-        #   m.setObjective(gp.quicksum(<expression in t> for t in T), <direction>)
-        # The input-data attributes (with units) are documented in src/data_loader.py (InputData).
+       
         m.setObjective(gp.quicksum(
             self.var["load"][t] * d.consumption_utility
             - d.pv_marginal_cost * self.var["pv"][t]
@@ -126,13 +110,7 @@ class FlexibleConsumerModel:
         ), GRB.MAXIMIZE)
 
         # --- Constraints -------------------------------------------------------------
-        # TODO: add the constraints of your formulation.
-        # Pattern for hourly constraints (one per hour, duals returned as a 24-vector; names are
-        # indexed automatically, like for the variables):
-        #   self.con["<name>"] = m.addConstrs(
-        #       (<lhs expression> - <rhs expression> <= 0 for t in T), name="<name>")
-        # Pattern for a single constraint (dual returned as a scalar):
-        #   self.con["<name>"] = m.addConstr(<lhs expression> - <rhs expression> <= 0, name="<name>")
+
         self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
         self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
         self.con["pv_max"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_max")
@@ -158,6 +136,17 @@ class FlexibleConsumerModel:
         status = _status_name(m.Status)
         if m.Status != GRB.OPTIMAL:
             raise RuntimeError(f"Optimisation ended with status {status}. Check the model (m.computeIIS() helps for infeasibility).")
+        if "charge" in self.var and "discharge" in self.var:
+            tolerance = 1e-6
+            overlap = [
+                t for t in self.T
+                if self.var["charge"][t].X > tolerance
+                and self.var["discharge"][t].X > tolerance
+            ]
+            if overlap:
+                print(f"Warning: simultaneous charging and discharging at hours {overlap}")
+            else:
+                print("No simultaneous charging and discharging detected.")
         return self._extract_results(status)
 
     # --------------------------------------------------------------- extraction
@@ -196,6 +185,313 @@ class FlexibleConsumerModel:
             meta={"scalar_variables": scalars},
         )
 
+#Question 2b(iii) Linear disutility function
+class LinearDisutilityModel(FlexibleConsumerModel):
+    """model for linear disutility model inheriting from FlexibleConsumerModel"""
+    def build(self):
+        #Inputs for Gurobi model
+        d, m, T = self.data, self.m, self.T
+
+        self.var["import"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="import")
+        self.var["export"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="export")
+        self.var["load"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="load")
+        self.var["pv"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="pv")
+
+        #d_t variable for disutility
+        #d_t = |L_t - L_ref_t|
+        self.var["abs_deviation"] = m.addVars(
+            T, lb=0, vtype=GRB.CONTINUOUS, name="abs_deviation"
+        )
+
+        #Shorter names for easier readability
+        L = self.var["load"]
+        PV = self.var["pv"]
+        imp = self.var["import"]
+        exp = self.var["export"]
+        dev = self.var["abs_deviation"]
+
+        #objective function with linear disutility
+        #Minimize electricity procurement cost and disutility from deviating from reference load
+        m.setObjective(
+            gp.quicksum(
+                (dev[t] * d.linear_disutility) 
+                + d.pv_marginal_cost * PV[t]
+                + (d.energy_price[t] + d.import_tariff) * imp[t]
+                - (d.energy_price[t] - d.export_tariff) * exp[t]
+                for t in T
+            ),
+            GRB.MINIMIZE,
+        )
+
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
+        self.con["pv_max"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_max")
+        self.con["balance"] = m.addConstrs(
+            (self.var["pv"][t] + self.var["import"][t]
+             == self.var["load"][t] + self.var["export"][t] for t in T),
+            name="balance",
+        )
+
+        #new disutility constraints
+        self.con["dev_above"] = m.addConstrs((dev[t] >= L[t] - d.reference_load[t] for t in T), name="dev_above")
+        self.con["dev_below"] = m.addConstrs((dev[t] >= d.reference_load[t] - L[t] for t in T), name="dev_below")
+        return self
+    
+#Question 2c(iii) Quadratic disutility function
+class QuadraticDisutilityModel(FlexibleConsumerModel):
+    """model for quadratic disutility model inheriting from FlexibleConsumerModel"""
+    def build(self):
+        #Inputs for Gurobi model
+        d, m, T = self.data, self.m, self.T
+        
+
+        self.var["import"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="import")
+        self.var["export"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="export")
+        self.var["load"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="load")
+        self.var["pv"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="pv")
+
+        #d_t variable for disutility
+        #d_t = |L_t - L_ref_t|
+        self.var["abs_deviation"] = m.addVars(
+            T, lb=0, vtype=GRB.CONTINUOUS, name="abs_deviation"
+        )
+
+        #Shorter names for easier readability
+        L = self.var["load"]
+        PV = self.var["pv"]
+        imp = self.var["import"]
+        exp = self.var["export"]
+        dev = self.var["abs_deviation"]
+
+        #objective function with quadratic disutility
+        #Minimize electricity procurement cost and disutility from deviating from reference load
+        m.setObjective(
+            gp.quicksum(
+                (dev[t]**2) * d.quadratic_disutility
+                + d.pv_marginal_cost * PV[t]
+                + (d.energy_price[t] + d.import_tariff) * imp[t]
+                - (d.energy_price[t] - d.export_tariff) * exp[t]
+                for t in T
+            ),
+            GRB.MINIMIZE,
+        )
+
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
+        self.con["pv_max"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_max")
+        self.con["balance"] = m.addConstrs(
+            (self.var["pv"][t] + self.var["import"][t]
+             == self.var["load"][t] + self.var["export"][t] for t in T),
+            name="balance",
+        )
+
+        #new disutility constraints
+        self.con["dev_above"] = m.addConstrs((dev[t] >= L[t] - d.reference_load[t] for t in T), name="dev_above")
+        self.con["dev_below"] = m.addConstrs((dev[t] >= d.reference_load[t] - L[t] for t in T), name="dev_below")
+        return self
+    
+
+
+#Question 2e(ii) Temporal disutility function
+class TemporalDisutilityModel(FlexibleConsumerModel):
+    """model for temporal disutility model inheriting from FlexibleConsumerModel"""
+    def build(self):
+        #Inputs for Gurobi model
+        d, m, T = self.data, self.m, self.T
+        temporal_disutility = 0.25
+        self.var["import"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="import")
+        self.var["export"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="export")
+        self.var["load"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="load")
+        self.var["pv"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="pv")
+
+        #d_t variable for disutility
+        #d_t = |L_t - L_ref_t|
+        self.var["abs_deviation"] = m.addVars(
+            T, lb=0, vtype=GRB.CONTINUOUS, name="abs_deviation"
+        )
+
+        #Shorter names for easier readability
+        L = self.var["load"]
+        PV = self.var["pv"]
+        imp = self.var["import"]
+        exp = self.var["export"]
+        dev = self.var["abs_deviation"]
+
+        #objective function with quadratic and temporal disutility
+        #Minimize electricity procurement cost and disutility from deviating from reference load
+        m.setObjective(
+            gp.quicksum(
+                (dev[t]**2) * d.quadratic_disutility
+                + d.pv_marginal_cost * PV[t]
+                + (d.energy_price[t] + d.import_tariff) * imp[t]
+                - (d.energy_price[t] - d.export_tariff) * exp[t]
+                for t in T
+            )
+            + gp.quicksum(
+                temporal_disutility * (dev[t]+dev[t-1])**2 for t in range(1, len(T))
+            ),
+            GRB.MINIMIZE,
+        )
+
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
+        self.con["pv_max"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_max")
+        self.con["balance"] = m.addConstrs(
+            (self.var["pv"][t] + self.var["import"][t]
+             == self.var["load"][t] + self.var["export"][t] for t in T),
+            name="balance",
+        )
+
+        #new disutility constraints
+        self.con["dev_above"] = m.addConstrs((dev[t] >= L[t] - d.reference_load[t] for t in T), name="dev_above")
+        self.con["dev_below"] = m.addConstrs((dev[t] >= d.reference_load[t] - L[t] for t in T), name="dev_below")
+        return self
+    
+
+
+
+#Question 2b(iii) Linear disutility function
+class Q3Model(FlexibleConsumerModel):
+    """model for qudatic disutility model with minimum energy constraint inheriting from FlexibleConsumerModel"""
+    def build(self):
+        #Inputs for Gurobi model
+        d, m, T = self.data, self.m, self.T
+
+        self.var["import"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="import")
+        self.var["export"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="export")
+        self.var["load"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="load")
+        self.var["pv"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="pv")
+        #self.var["E_min"] = m.addVar(lb=-GRB.INFINITY, vtype=GRB.CONTINUOUS, name="E_min")
+
+        #d_t variable for disutility
+        #d_t = |L_t - L_ref_t|
+        self.var["abs_deviation"] = m.addVars(
+            T, lb=0, vtype=GRB.CONTINUOUS, name="abs_deviation"
+        )
+
+        #Shorter names for easier readability
+        L = self.var["load"]
+        PV = self.var["pv"]
+        imp = self.var["import"]
+        exp = self.var["export"]
+        dev = self.var["abs_deviation"]
+
+        #objective function with linear disutility
+        #Minimize electricity procurement cost and disutility from deviating from reference load
+        m.setObjective(
+            gp.quicksum(
+                d.quadratic_disutility * dev[t]**2 
+                + d.pv_marginal_cost * PV[t]
+                + (d.energy_price[t] + d.import_tariff) * imp[t]
+                - (d.energy_price[t] - d.export_tariff) * exp[t]
+                for t in T
+            ),
+            GRB.MINIMIZE,
+        )
+
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
+        self.con["pv_max"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_max")
+        self.con["balance"] = m.addConstrs(
+            (self.var["pv"][t] + self.var["import"][t] 
+             == self.var["load"][t] + self.var["export"][t] for t in T),
+            name="balance",
+        )
+
+
+
+        self.con["dev_above"] = m.addConstrs((dev[t] >= L[t] - d.reference_load[t] for t in T), name="dev_above")
+        self.con["dev_below"] = m.addConstrs((dev[t] >= d.reference_load[t] - L[t] for t in T), name="dev_below")
+
+        self.con["min_total_energy_per_day_kWh"] = m.addConstr(
+            gp.quicksum(self.var["load"][t] for t in T)
+            >= (d.min_daily_energy_kWh),
+            name="min_total_energy_per_day_kWh",
+        )
+
+        return self
+
+class Q3Model_bat(FlexibleConsumerModel):
+    """model for qudatic disutility model with minimum energy and battery constraint inheriting from FlexibleConsumerModel"""
+    def build(self):
+        #Inputs for Gurobi model
+        d, m, T = self.data, self.m, self.T
+
+        self.var["import"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="import")
+        self.var["export"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="export")
+        self.var["load"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="load")
+        self.var["pv"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="pv")
+        #self.var["E_min"] = m.addVar(lb=-GRB.INFINITY, vtype=GRB.CONTINUOUS, name="E_min")
+
+        #d_t variable for disutility
+        #d_t = |L_t - L_ref_t|
+        self.var["abs_deviation"] = m.addVars(
+            T, lb=0, vtype=GRB.CONTINUOUS, name="abs_deviation"
+        )
+
+        self.var["charge"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="charge")
+        self.var["discharge"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="discharge")
+
+        self.var["soc"] = m.addVars(T, lb=0, vtype=GRB.CONTINUOUS, name="soc")
+
+        #Shorter names for easier readability
+        L = self.var["load"]
+        PV = self.var["pv"]
+        imp = self.var["import"]
+        exp = self.var["export"]
+        dev = self.var["abs_deviation"]
+
+        #objective function with linear disutility
+        #Minimize electricity procurement cost and disutility from deviating from reference load
+        m.setObjective(
+            gp.quicksum(
+                d.quadratic_disutility * dev[t]**2 
+                + d.pv_marginal_cost * PV[t]
+                + (d.energy_price[t] + d.import_tariff) * imp[t]
+                - (d.energy_price[t] - d.export_tariff) * exp[t]
+                for t in T
+            ),
+            GRB.MINIMIZE,
+        )
+
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
+        self.con["pv_max"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_max")
+        self.con["balance"] = m.addConstrs(
+            (self.var["pv"][t] + self.var["import"][t]
+             + self.var["discharge"][t]
+             == self.var["load"][t] + self.var["export"][t] + self.var["charge"][t] for t in T),
+            name="balance",
+        )
+        self.con["charge_max"] = m.addConstrs((self.var["charge"][t] <= d.battery_max_charge_kW for t in T), name="charge_max")
+        self.con["discharge_max"] = m.addConstrs((self.var["discharge"][t] <= d.battery_max_discharge_kW for t in T), name="discharge_max")
+        #new disutility constraints
+        self.con["dev_above"] = m.addConstrs((dev[t] >= L[t] - d.reference_load[t] for t in T), name="dev_above")
+        self.con["dev_below"] = m.addConstrs((dev[t] >= d.reference_load[t] - L[t] for t in T), name="dev_below")
+        self.con["soc_max"] = m.addConstrs((self.var["soc"][t] <= d.battery_capacity_kWh for t in T), name="soc_max")
+        self.con["soc_min"] = m.addConstrs((self.var["soc"][t] >= 0 for t in T), name="soc_min")
+        self.con["soc_balance"] = m.addConstrs(
+            (self.var["soc"][t]== (d.battery_initial_soc_kWh
+                    if t == 0
+                    else self.var["soc"][t - 1]
+                )
+                + self.var["charge"][t] * d.battery_charging_efficiency
+                - self.var["discharge"][t] * (1 / d.battery_discharging_efficiency)
+                for t in T
+            ),
+            name="soc_balance",
+        )
+        self.con["soc_final"] = m.addConstr(
+            self.var["soc"][T[-1]] == 0,#d.battery_initial_soc_kWh,
+            name="soc_final",
+        )
+
+        self.con["min_total_energy_per_day_kWh"] = m.addConstr(
+            gp.quicksum(self.var["load"][t] for t in T)
+            >= (d.min_daily_energy_kWh),
+            name="min_total_energy_per_day_kWh",
+        )
+        return self
 
 _STATUS = {
     GRB.OPTIMAL: "OPTIMAL", GRB.INFEASIBLE: "INFEASIBLE", GRB.UNBOUNDED: "UNBOUNDED",

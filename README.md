@@ -210,3 +210,168 @@ your report. In practice:
 * make each experiment of the report runnable with a single command (e.g. `python main.py --question ...`
   or one notebook cell), and save its outputs under `results/`;
 * commit regularly and with meaningful messages - the git history is also a record of everyone's contribution.
+
+# ADDED SECTION: documenting added commands and helper functions for the Q2 and Q3 experiments, as well as a quick guide to run them.
+
+## 6. Additional commands added - Quickguide
+
+Run all base cases:
+
+```bash
+python main.py --all
+```
+
+Run the Q2 analyses:
+
+```bash
+python main.py --question Q2_linear_sweep
+python main.py --question Q2_quadratic_sweep
+python main.py --question Q2_temporal
+python main.py --question Q2_price_sweep
+```
+
+Run the Q3 analyses:
+
+```bash
+python main.py --question Q3
+python main.py --question Q3_battery
+```
+
+Run Q3 sensitivity analyses:
+
+```bash
+python main.py --question Q3 --q3-sensitivity
+python main.py --question Q3_battery --q3-sensitivity
+```
+
+## Question 2 experiments
+The models and sweep analysis used for Question 2 can be reproduced directly from `main.py`
+Each experiment writes its results and figures to the corresponding folder under `results/`
+
+### Linear disutility model
+The base case and the sweep for the linear model are run with:
+```bash
+python main.py --question Q2_linear
+python main.py --question Q2_linear_sweep
+```
+For the sweep, the following values are investigated: cL = {0.5, 1.0, 1.43, 2.0, 2.1, 3.5} DKK/kWh
+For every value, a modified copy of the base input data is created using `set_linear_disutility()` from `src/scenarios.py.`
+Results are written to `results/Q2_linear_sweep/`
+
+### Quadratic disutility model
+The base case and the sweep for the quadratic model are run with:
+```bash
+python main.py --question Q2_quadratic
+python main.py --question Q2_quadratic_sweep
+```
+For the sweep, the following values are investigated: cQ = {0.1, 0.5, 1.0, 2.0, 5.0, 10.0} DKK/kWh^2
+For every value, a modified copy of the base input data is created using `set_quadratic_disutility()` from `src/scenarios.py.`
+Results are written to `results/Q2_quadratic_sweep/`
+
+### Temporal disutility model
+The temporal model uses the input data from `Q2_quadratic` with cQ = 1.0 DKK/kWh^2 and the additional temporal disutility coefficient cT = 0.25 DKK/kWh^2.
+It is implemented in `TemporalDisutilityModel` and adds a penalty for consecutive deviations from the reference load profile.
+```bash
+python main.py --question Q2_temporal
+```
+Results are written to `results/Q2_temporal/`
+
+### Alternating and consecutive price experiment for all models
+The price profile for experiment from Q2e is run with:
+```bash
+python main.py --question Q2_price_sweep
+```
+Two electricity profiles are compared:
+Alternating prices between 1.0 and 2.0 DKK/kWh from hour to hour
+Consecutive prices where hours 0-5 have a price of 1.0 DKK/kWh, hours 6-17 have a price of 2.0 DKK/kWh, and hours 18-23 have a price of 1.0 DKK/kWh
+The two electricity profiles are applied to all three question 2 models:
+`LinearDisutilityModel`
+`QuadraticDisutilityModel`
+`TemporalDisutilityModel`
+This produces 6 runs in total. The price profile is changed using `set_prices()` from `src/scenarios.py`
+Results and figures are written to `results/Q2_price_sweep/`
+
+
+
+## Question 2 scenario helpers
+
+The following helper functions were added to `src/scenarios.py` for the
+Question 2 sweep analyses:
+
+- `set_linear_disutility(data, linear_disutility)` returns a copy of the
+  input data with a modified linear disutility coefficient in DKK/kWh.
+
+- `set_quadratic_disutility(data, quadratic_disutility)` returns a copy of
+  the input data with a modified quadratic disutility coefficient in DKK/kWh^2.
+
+- `set_prices(data, energy_price)` returns a copy of the input data with a
+  modified 24-hour electricity-price profile in DKK/kWh.
+
+These functions allow the sweep analyses to be generated from the
+original base cases without modifying the base input data.
+
+**Use it from a notebook or your own script** (run from the repository root):
+```python
+from src.data_loader import load_question
+from src.model import FlexibleConsumerModel
+from src.plotting import plot_schedule, plot_duals
+from src.scenarios import scale_prices
+
+data = load_question("Q1_caseA")
+print(data.summary())
+
+results = FlexibleConsumerModel(data).build().solve()
+print(results)                    # objective, daily totals, scalar duals
+results.hourly                    # DataFrame: one row per hour with variables, prices and hourly duals
+plot_schedule(results, data)
+
+high_spread = scale_prices(data, factor=2.0, keep_mean=True)
+results_hs = FlexibleConsumerModel(high_spread).build().solve()
+```
+## Additional price profiles for Question 2e
+For the numerical experiment in Question 2e, two additional price-profile files were added.
+`bus_params_alternating_prices.json`
+: Contains a 24-hour electricity-price profile alternating between
+1.0 and 2.0 DKK/kWh. The profile contains 12 low-price and 12 high-price hours.
+
+`bus_params_consecutive_prices.json`
+: Contains the same 12 low-price and 12 high-price hours, but groups the
+high-price hours consecutively. Hours 0-5 use 1.0 DKK/kWh, hours 6-17 use
+2.0 DKK/kWh, and hours 18-23 use 1.0 DKK/kWh.
+
+Both profiles therefore have an average electricity price of 1.5 DKK/kWh.
+The files are used by `run_q2_price_sweep()` in `main.py` and applied to the normal `Q2_linear` and `Q2_quadratic` base cases through `set_prices()`
+
+
+## Question 3 code and sensitivity analysis
+
+The Q3 base case models a flexible load with a minimum daily energy
+requirement and quadratic disutility for deviating from the reference load
+profile taking the model from Question 2 c as a starting point and adds a minimum daily energy requirement. The base case can be run with:
+
+```bash
+python main.py --question Q3
+```
+
+The Q3 battery case uses the same consumer and adds a battery with charging,
+discharging, and state-of-charge constraints:
+
+```bash
+python main.py --question Q3_battery
+```
+
+The base-case results and figures are saved under `results/Q3/` and
+`results/Q3_battery/`. These folders contain the hourly results, input data
+plot, optimal schedule, and dual plots.
+
+The corresponding sensitivity analyses can be run with:
+
+```bash
+python main.py --question Q3 --q3-sensitivity
+python main.py --question Q3_battery --q3-sensitivity
+```
+
+The Q3 sensitivity analysis varies minimum daily energy, quadratic disutility,
+and price spread. The battery case varies price spread and battery capacity.
+Results and figures are saved under `results/Q3_sensitivity/` and
+`results/Q3_battery_sensitivity/`.
