@@ -22,7 +22,7 @@ import numpy as np
 from .data_loader import InputData
 
 
-def scale_prixces(data: InputData, factor: float, keep_mean: bool = False) -> InputData:
+def scale_prices(data: InputData, factor: float, keep_mean: bool = False) -> InputData:
     """Multiply hourly prices by ``factor``. With ``keep_mean=True`` only the spread around the
     mean is scaled, which isolates the effect of price variability from the effect of price level."""
     p = data.energy_price
