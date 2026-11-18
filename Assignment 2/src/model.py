@@ -496,6 +496,7 @@ class Model():
         members = members.astype({c: float for c in members.columns if c != "archetype"})
         if self.contract == "DP":
             members["payment"] = [self.pay[cid].getValue() for cid in members.index]
+            members["settled_total"] = members["total"] + members["payment"]
 
         # ---- per-member hourly schedules (long format)
         frames = []
@@ -525,7 +526,8 @@ class Model():
         )
         if self.contract == "DP":
             metrics["manager_budget_DKK"] = self.budget.getValue()
-        return Results(question=f"Q1_{self.contract}", status="OPTIMAL",
+        question_prefix = "Q1" if self.contract in ("R", "I", "C") else "Q2"
+        return Results(question=f"{question_prefix}_{self.contract}", status="OPTIMAL",
                        objective=metrics["total_cost_DKK"], hourly=hourly,
                        meta=dict(metrics=metrics, members=members, schedules=schedules, solutions=sol, prices=prices if self.contract == "DP" else None))
 
@@ -540,4 +542,3 @@ _STATUS = {
 
 def _status_name(code: int) -> str:
     return _STATUS.get(code, f"STATUS_{code}")
-

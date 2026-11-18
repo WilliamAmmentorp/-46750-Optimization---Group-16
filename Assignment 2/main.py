@@ -98,7 +98,8 @@ def _build_and_run_model(com, out: Path, model_type: str) -> Results:
     else:
         model = Model(com, model_type)
     model.build()
-    print(model.m.getConstrByName("budget_balance"))
+    if model_type in ("DP_bb", "DP_disbb"):
+        print(model.m.getConstrByName("budget_balance"))
     try:
         results = model.solve()
     except NotImplementedError as e:

@@ -73,14 +73,16 @@ MODEL_VARIANTS = {
 }
 
 def contract_experiments_Q2(com) -> dict:
-    """Q2 sweeps: penalty alpha and the bound on the posted price (one at a time)."""
+    """Q2 sweeps: penalty, posted-price bound, and capacity scale, one at a time."""
     c = com.contract
     x_default = c.penalty_DKK_per_kWh + com.energy_price.max() + com.import_tariff    # the bound Model uses by default (13.0)
     return {
         "penalty": ("Penalty alpha [DKK/kWh]", c.penalty_DKK_per_kWh,
-                    {a: with_penalty(com, a) for a in [0.0, 2.5, 5.0, 10.0]}),
+                    {a: with_penalty(com, a) for a in [0.0, 2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 20.0]}),
         "price_bound": ("Price bound X [DKK/kWh]", x_default,
-                        {X: com for X in [3.0, 5.0, 7.0, 10.0, x_default]}),
+                        {X: com for X in [3.0, 5.0, 7.0, 10.0, x_default, 16.0, 20.0]}),
+        "cap_scale": ("Capacity scale", 1.0,
+                      {s: with_cap_scale(com, s) for s in [0.6, 0.8, 1.0, 1.2, 1.5]}),
     }
 
 def sensitivity_rows_Q2(com, experiments: dict, models=("DP", "DP_dis", "DP_bb", "DP_disbb"), verbose=False) -> pd.DataFrame:

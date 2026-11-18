@@ -170,22 +170,37 @@ _COLORS_Q2 = {"C": "k", "DP": "C0", "DP_dis": "C1", "DP_bb": "C2", "DP_disbb": "
 _MARKERS_Q2 = {"C": "s", "DP": "o", "DP_dis": "x", "DP_bb": "^", "DP_disbb": "v"}   # different markers: identical lines stay visible
 
 def plot_dp_sweep(table, experiments: dict, out: Path, prefix: str) -> None:
-    """Row 1: efficiency cost against C. Row 2: manager's budget. One column per experiment."""
+    """Compare total cost, efficiency loss, and manager budget across Q2 sweeps."""
     n = len(experiments)
-    fig, axes = plt.subplots(2, n, figsize=(5.5 * n, 7), squeeze=False, constrained_layout=True)
+    fig, axes = plt.subplots(3, n, figsize=(5.5 * n, 10), squeeze=False, constrained_layout=True)
     for col, (name, (label, base, _)) in enumerate(experiments.items()):
         t = table[(table["experiment"] == name) & (table["status"] == "OK")]
         for model, g in t.groupby("model"):
             g = g.sort_values("parameter_value")
             kw = dict(color=_COLORS_Q2[model], marker=_MARKERS_Q2[model], label=model)
-            if model != "C":
-                axes[0, col].plot(g["parameter_value"], g["loss_vs_C_DKK"], **kw)
-                axes[1, col].plot(g["parameter_value"], g["budget_DKK"], **kw)
-        for r in range(2):
-            axes[r, col].axhline(0, color="k", lw=0.8)
+            if model == "C":
+                axes[0, col].plot(g["parameter_value"], g["total_cost_DKK"], **kw)
+            else:
+                axes[0, col].plot(g["parameter_value"], g["total_cost_DKK"], **kw)
+                axes[1, col].plot(g["parameter_value"], g["loss_vs_C_DKK"], **kw)
+                axes[2, col].plot(g["parameter_value"], g["budget_DKK"], **kw)
+        axes[1, col].axhline(0, color="k", lw=0.8)
+        axes[2, col].axhline(0, color="k", lw=0.8)
+        for r in range(3):
             axes[r, col].axvline(base, color="red", ls="--", lw=1)
-        axes[0, col].set(title=f"Cost above central dispatch C: {label}", ylabel="cost - cost(C) [DKK]")
-        axes[1, col].set(xlabel=label, ylabel="manager budget [DKK]", title="Budget (0 = balanced)")
+        axes[0, col].set(
+            title=f"Total community cost: {label}",
+            ylabel="total cost [DKK]",
+        )
+        axes[1, col].set(
+            title=f"Efficiency loss relative to C: {label}",
+            ylabel="DP cost - C cost [DKK]",
+        )
+        axes[2, col].set(
+            xlabel=label,
+            ylabel="payments - manager cost [DKK]",
+            title="Budget imbalance (0 = balanced)",
+        )
         axes[0, col].legend(fontsize=8)
     fig.savefig(out / f"{prefix}.png", dpi=150)
     plt.close(fig)
@@ -204,8 +219,9 @@ def member_results(results: Results, d: InputData, price=None) -> Results:
     row = results.meta["members"].loc[d.consumer_id]
     scalars = {c.removeprefix("dual_"): float(row[c])
                for c in row.index if c.startswith("dual_") and pd.notna(row[c])}
+    objective = float(row["settled_total"]) if "settled_total" in row else float(row["total"])
     return Results(question=f"{results.question}_{d.consumer_id}", status=results.status,
-                   objective=float(row["total"]), hourly=df, duals=scalars)
+                   objective=objective, hourly=df, duals=scalars)
 
 
 def plot_import_vs_cap(results: Results, save_to: Path | str | None = None) -> plt.Figure:
