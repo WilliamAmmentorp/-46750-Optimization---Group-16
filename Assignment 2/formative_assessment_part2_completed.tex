@@ -1,0 +1,397 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\documentclass[]{article}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp}
+\else
+  \usepackage{unicode-math}
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{\usepackage[]{microtype}\UseMicrotypeSet[protrusion]{basicmath}}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{
+  \IfFileExists{parskip.sty}{
+    \usepackage{parskip}
+  }{
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}
+  }
+}{
+  \KOMAoptions{parskip=half}
+}
+\makeatother
+\usepackage{longtable,booktabs,array}
+\newcounter{none}
+\usepackage{calc}
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}
+\makeatother
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\setlength{\emergencystretch}{3em}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{}
+\urlstyle{same}
+\hypersetup{hidelinks,pdfcreator={LaTeX via pandoc}}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\author{}
+\date{}
+
+\begin{document}
+
+\section{Assignment 2 -- Formative assessment (Part 2)}
+\label{assignment-2-formative-assessment-part-2}
+
+\textbf{Question 3 and the plan of numerical experiments of Question 2}
+
+\textbf{Group:} 16
+\textbf{Members:} William Ammentorp -- s223860, Anton H{\o}ier Troelsen -- s223877,
+Emil M{\o}ller Kristensen -- s244504, Selim Gabriele Francesco Foglino -- s260275
+
+\emph{At most 6 pages, plus the feedback page. Keep the items, their order and their numbering.}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part 0 -- Status and feedback requests}
+\label{part-0-status-and-feedback-requests}
+
+\subsubsection{0.1 Status}
+\label{status}
+
+For each model: formulated, implemented, validated (yes / partly / not yet), and the validation check used.
+
+\begin{longtable}[]{@{}lllll@{}}
+\toprule
+Model & Formulated & Implemented & Validated & Validation check used \\
+\midrule
+\endhead
+\(\mathcal{DP}\), \(\mathcal{DP}^{dis}\), \(\mathcal{DP}^{bb}\), and
+\(\mathcal{DP}^{disbb}\) & Yes & Yes & Partly & MIP gap 0.00\%, KKT construction,
+base-case and sensitivity runs, aggregate identity checks \\
+Baseline \(\mathcal{DP}\) at the expected parameters & Yes & Yes & Yes &
+Comparison with model \(\mathcal{C}\): equal objective and zero cap exceedance
+at \(\alpha=5\) DKK/kWh \\
+DP individual-rationality variants & Partly & No & Not yet &
+No DP IR constraints or DP member-comparison results exist yet \\
+Scenario generation & No & No & Not yet &
+Not started \\
+\(\mathcal{SDP}^{E}\) & No & No & Not yet &
+Not started \\
+\(\mathcal{SDP}^{CC}\) & No & No & Not yet &
+Not started \\
+Evaluation module (out-of-sample) & No & No & Not yet &
+Not started \\
+\bottomrule
+\end{longtable}
+
+The DP implementations use Big-M complementarity in \texttt{add\_kkt}.
+They include uniform or member-specific posted prices and an optional
+budget-balance constraint. The Q1 \texttt{settle\_Q1} routine evaluates
+individual rationality for model \(\mathcal C\), but it is not yet applied
+inside or across the DP variants.
+
+If you took part in Round 1, what you changed after the feedback (one line):
+
+\begin{quote}
+We did not take part in Round 1. This sheet reports the first formative-assessment plan.
+\end{quote}
+
+\subsubsection{0.2 Feedback requests}
+\label{feedback-requests}
+
+\begin{enumerate}
+\tightlist
+\item
+  \textbf{D1, IR:} Should individual rationality in DP be imposed against
+  model \(\mathcal R\), model \(\mathcal I\), or a best-alternative cost
+  \(\min(c_i^R,c_i^I)\) for each member and scenario?
+\item
+  \textbf{D1, infeasibility:} When a DP budget-balance or IR requirement
+  becomes infeasible, should the study report the nearest feasible
+  relaxation or the unsolved status as a separate infeasible outcome?
+\item
+  \textbf{D2:} Is the price bound \(|x_t|\le X\) sufficient, or should
+  the feedback suggest a tighter/regularized interpretation of the posted
+  price in addition to Big-M bounds?
+\end{enumerate}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Part D -- Question 2, plan of numerical experiments}
+\label{part-d-question-2-plan-of-numerical-experiments}
+
+One experiment card per planned study. D1 and D2 are expected; D3 is
+optional.
+
+\subsubsection{D1 Three-step study: \(\mathcal{DP}\) with the cap only,
+then with budget balance, then with individual rationality, against the
+relevant models of Question 1}
+\label{d1-three-step-study-mathcaldp}
+
+\begin{longtable}[]{@{}
+>{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.50}}
+>{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.50}}@{}}
+\toprule
+Field & \\
+\midrule
+\endhead
+\textbf{1. Question} &
+How much of the centralized flexibility and welfare of model
+\(\mathcal C\) can the manager recover using only hourly posted prices?
+How does adding budget balance and then individual rationality change
+efficiency, feasibility, member payments, and the use of discriminatory
+prices? \\
+\textbf{2. Hypothesis} &
+At the base penalty and price bound, the cap-only variants
+\(\mathcal{DP}\) and \(\mathcal{DP}^{dis}\) should reproduce much of
+\(\mathcal C\). Budget balance may require the community to give up
+flexibility if no uniform price can provide both the central dispatch and
+zero net budget. Discriminatory prices may reduce this loss, but the
+members with high disutility or large PV/battery exports may be the
+main blockers of uniform-price IR and budget redistribution. \\
+\textbf{3. Protocol} &
+Use the base-case community and day \(d1\). Run
+\(\mathcal R\), \(\mathcal I\), \(\mathcal C\),
+\(\mathcal{DP}\), \(\mathcal{DP}^{dis}\),
+\(\mathcal{DP}^{bb}\), and \(\mathcal{DP}^{disbb}\).
+The cap-only step uses no \texttt{budget\_balance} constraint. The second
+step adds \texttt{budget\_balance == 0}. The planned third step adds
+member-level IR constraints versus \(\mathcal R\), \(\mathcal I\), or
+their best alternative. Infeasibility must be recorded explicitly with
+status, parameters, and the resulting blocking members. \\
+\textbf{4. Metrics} &
+Cost loss versus \(\mathcal C\), community objective, aggregate and
+member shifted energy, import peak, cap exceedance, manager budget,
+member-payment range, number of IR violations, and maximum member
+price spread. \\
+\textbf{5. Figure or table} &
+\emph{Figure or table placeholder (required):}
+\textbf{A four-panel comparison with cost loss, budget, cap exceedance,
+and IR violations across \(\mathcal C\), \(\mathcal R\),
+\(\mathcal I\), and the four DP variants.} Use model variants on the
+x-axis and one metric per panel. The draft caption should conclude
+whether budget balance and IR are achieved without a meaningful loss
+from the centralized dispatch. \\
+\textbf{6. Expected insight} &
+The base result is expected to show that cap-only DP can recover the
+centralized physical dispatch; the budget-balance and IR steps reveal
+whether redistribution can be obtained without sacrificing efficiency.
+A result contradicting this would be an efficiency loss already in the
+cap-only problem or, conversely, no loss after adding budget balance. \\
+\textbf{7. Status} &
+Preliminary: cap-only and both budget-balance variants have been solved.
+DP versus model C base-case results have been validated. IR-constrained
+DP variants and infeasibility reporting are planned. \\
+\bottomrule
+\end{longtable}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\begin{minipage}{0.94\linewidth}
+\centering
+\vspace{2cm}
+\textbf{PICTURE NEEDED: D1 base-case comparison figure}\\
+Panels: (1) total cost and loss versus model C, (2) manager budget,
+(3) peak import and exceedance, and (4) member-level IR gains/violations
+against R and I. Compare R, I, C, DP, DP-dis, DP-bb, and DP-disbb.
+\vspace{2cm}
+\end{minipage}}
+\caption{Placeholder for the D1 three-step study.}
+\label{fig:d1_placeholder}
+\end{figure}
+
+\begin{longtable}[]{@{}llllll@{}}
+\toprule
+Metric & Definition & Unit & Reference & Point of view & Sign \\
+\midrule
+\endhead
+Cost loss & \(J(\mathcal M)-J(\mathcal C)\), \(J\) is the community objective
+& DKK & \(\mathcal C\) & Manager/community & Positive is worse \\
+Manager budget & Member payments minus grid cost and exceedance penalty
+& DKK & 0 & Manager & Positive is surplus \\
+Member cost gain & Cost in alternative minus cost under the DP variant
+& DKK & R or I & Member & Positive is better off \\
+IR violations & Number of members with gain \(<0\) & count & 0 & Member
+& Higher is worse \\
+Peak import & Maximum aggregate connection-point import & kW & Cap profile
+& Community/DSO & Lower is better \\
+Exceedance & Sum of hourly import above the cap & kWh & 0 & DSO
+& Positive is worse \\
+Price spread & Maximum difference between member prices in an hour
+& DKK/kWh & 0 for uniform DP & Members & Positive indicates discrimination \\
+\bottomrule
+\end{longtable}
+
+\textbf{Preliminary base-case observation.}
+At \(\alpha=5\) DKK/kWh and the default price bound, the community objective
+is 360.19 DKK for DP and DP-dis, and also for both budget-balanced variants.
+The aggregate peak import is 9.39 kW and exceedance is zero. The
+budget-balanced runs have approximately zero manager budget, while the
+cap-only runs retain a positive budget. These numbers show that a
+uniform/common or discriminatory price can affect payments while reproducing
+the same base-case physical dispatch.
+
+\subsubsection{D2 Contract terms: whether a uniform price can meet the
+requirements, with the feasibility of each step, its efficiency cost,
+and the blocking members along the study}
+\label{d2-contract-terms}
+
+\begin{longtable}[]{@{}
+>{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.50}}
+>{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.50}}@{}}
+\toprule
+Field & \\
+\midrule
+\endhead
+\textbf{1. Question} &
+How do capacity-exceedance penalty \(\alpha\), posted-price bound \(X\),
+and cap tightness affect uniform-price feasibility, efficiency, and
+budget balance relative to the centralized and discriminatory benchmarks? \\
+\textbf{2. Hypothesis} &
+The uniform models should lose less as \(\alpha\) and the price bound
+increase. Very low price bounds and tight caps should be where uniform
+prices fail to reproduce model C or become budget-unbalanced.
+Discriminatory prices should reduce the loss under such restrictions.
+The members that block uniform IR are expected to be members with little
+flexibility or with high PV/battery surplus; this must be confirmed once
+DP member-level IR constraints are implemented. \\
+\textbf{3. Protocol} &
+Vary one contract term at a time on the base community:
+\(\alpha\in\{0,2.5,5,7.5,10,12.5,15,20\}\) DKK/kWh;
+\(X\in\{3,5,7,10,13,16,20\}\) DKK/kWh; and the cap scale
+\(\{0.6,0.8,1.0,1.2,1.5\}\), where 1.0 is the shipped base cap.
+Keep the remaining terms fixed. Solve model C as a benchmark and
+\(\mathcal{DP}\), \(\mathcal{DP}^{dis}\),
+\(\mathcal{DP}^{bb}\), and \(\mathcal{DP}^{disbb}\) for each setting.
+The sensitivity currently contains 20 parameter points and 100 model
+result rows, including model C and the four DP variants. Record infeasible
+models separately. \\
+\textbf{4. Metrics} &
+Cost loss versus C, manager budget, exceedance, hours above cap, peak
+import, feasibility status, member-payment range and spread, and the
+blocking members under budget/IR requirements once implemented. \\
+\textbf{5. Figure or table} &
+\emph{Figure or table placeholder (required):}
+\textbf{Three sensitivity panels for (a) penalty \(\alpha\),
+(b) price bound \(X\), and (c) cap scale.}
+Plot cost loss versus C and manager budget, with C, DP, DP-dis,
+DP-bb, and DP-disbb identified by separate markers. \\
+\textbf{6. Expected insight} &
+The uniform-price feasible region and its efficiency cost can be identified
+from the sensitivity figures. The discriminatory variants should remain
+closer to C when uniform prices become restrictive.
+A contradicting result would be DP-dis not improving the uniform result
+for every restrictive parameter, or a uniform budget-balanced model
+remaining exactly at C without a restriction. \\
+\textbf{7. Status} &
+Preliminary results exist for all three sweeps. The CSV results
+provide 20 parameter points and the corresponding C/DP variants.
+DP individual-rationality constraints and blocking-member analysis
+are not yet implemented. \\
+\bottomrule
+\end{longtable}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\begin{minipage}{0.94\linewidth}
+\centering
+\vspace{2cm}
+\textbf{PICTURE NEEDED: D2 sensitivity plot}\\
+Create \texttt{Q2\_sensitivity.png} already produced by
+\texttt{plot\_dp\_sweep}. It should show cost loss versus C and manager
+budget for penalty, price bound, and cap scale. Confirm the x-axis and
+legend before publication.
+\vspace{2cm}
+\end{minipage}}
+\caption{Placeholder for the D2 contract-term sensitivity.}
+\label{fig:d2_placeholder}
+\end{figure}
+
+\begin{longtable}[]{@{}llllll@{}}
+\toprule
+Metric & Definition & Unit & Reference & Point of view & Sign \\
+\midrule
+\endhead
+Cost loss & \(J_{\mathrm{DP}}-J_{\mathrm C}\) & DKK & 0 & Community
+& Positive is worse \\
+Feasibility & \texttt{OK} or \texttt{NO SOLUTION} & category & OK
+& Manager & An infeasible outcome is a restriction \\
+Budget & Member payments minus DSO grid cost & DKK & 0 & Manager
+& Absolute value measures imbalance \\
+Exceedance & Aggregate import above the cap & kWh & 0 & DSO
+& Positive is worse \\
+Peak import & Maximum aggregate import & kW & Cap & DSO
+& Higher than cap indicates congestion \\
+Hours above cap & Number of hours with positive exceedance & hours
+& 0 & DSO & Positive is worse \\
+Member spread & Difference among member-specific posted prices
+& DKK/kWh & 0 & Members & Positive indicates discrimination \\
+Blocking members & Members that prevent the uniform/IR requirement
+& count/IDs & 0 & Members & Higher count is worse \\
+\bottomrule
+\end{longtable}
+
+\textbf{Preliminary parameter evidence.}
+At a penalty of zero, model C and all DP variants have the same high
+exceedance of 137.18 kWh and a peak of 43.44 kW. At the base penalty,
+DP and DP-dis recover model C exactly, while uniform and discriminatory
+budget balance both remain feasible. With a price bound of 3 DKK/kWh,
+DP has a 1.239 DKK loss, DP-dis 0.190 DKK, DP-bb 1.555 DKK, and
+DP-disbb 0.354 DKK versus C. At a 10 DKK/kWh bound, all DP variants
+essentially reproduce C.
+
+\subsubsection{D3 Optional: one further study, and the conclusion it
+would change}
+\label{d3-optional-one-further-study-and-the-conclusion-it-would-change}
+
+\begin{longtable}[]{@{}ll@{}}
+\toprule
+Field & \\
+\midrule
+\midrule
+\endhead
+\textbf{1. Question} &
+Does removing battery availability reduce the ability of uniform posted
+prices to reproduce model C and satisfy budget balance? \\
+\textbf{2. Hypothesis} &
+Without batteries, fewer flexible assets remain for intraday shifting.
+Uniform prices are therefore expected to become more restrictive and to
+have a larger efficiency loss, while member-specific prices may preserve
+more of model C. \\
+\textbf{3. Protocol} &
+Create a no-battery member-mix variation by setting all battery parameters
+to \texttt{None}. Recompute model R and the connection-point cap
+according to the Table 11 rule, and recompute individual-contract shares
+using the selected split rule. Run C and the four DP variants in the base
+day, keeping \(\alpha\), \(\beta\), and \(X\) fixed. \\
+\textbf{4. Metrics} &
+Cost loss versus C, budget, cap exceedance, shifted energy, number of
+uniform-price/IR violations, and the member types blocked. \\
+\textbf{5. Figure or table} &
+\emph{Figure or table placeholder (required):} paired bars or lines for
+base mix versus no-battery mix, showing cost loss and IR violations for
+uniform and discriminatory DP variants. \\
+\textbf{6. Expected insight} &
+If discriminatory DP recovers C in the no-battery community but uniform
+DP does not, then batteries are not the only source of discrimination
+requirements; load-disutility heterogeneity alone can block uniform prices.
+The conclusion would change if both uniform and discriminatory models
+remain at C or if removing batteries does not affect the uniform result. \\
+\textbf{7. Status} &
+Optional and planned. The variation is not yet implemented or solved. \\
+\bottomrule
+\end{longtable}
+
+

@@ -72,58 +72,124 @@ from collections import defaultdict
 
 
 def add_kkt(m, mm, x, tag, compl="bigM", M=None):
-    """Embed the KKT conditions of member mm's LP into the joint model m (bounded variables).
+    """Embed member mm's KKT conditions in the joint single-level DP model.
 
-    M = {'dual': bound on multipliers/reduced costs, 'primal': bound on member variables and slacks}.
-    Returns dual_cost = the member's total cost (payment + pv + disutility) by strong duality.
+    M contains the bounds used for the dual variables and for member primal
+    variables/slacks. The complementarity pairs are linearized either with
+    Gurobi SOS1 constraints or with binary Big-M constraints.
+
+    Returns a dictionary containing the member's strong-duality cost.
     """
-    M = M or dict(dual=20.0, primal=5.0)
-    D, P = M["dual"], M["primal"]
-    m.update()
-    T = mm.T
-    obj0 = mm.pv_cost + mm.disutility
-    c0 = {obj0.getVar(i): obj0.getCoeff(i) for i in range(obj0.size())}
-    price = {}
-    for t in T:
-        price[mm.var["import"][t]] = 1.0 * x[t]
-        price[mm.var["export"][t]] = -1.0 * x[t]
+    if compl not in ("bigM", "sos1"):
+        raise ValueError("compl must be 'bigM' or 'sos1'")
 
-    rows = []
+    M = M or dict(dual=20.0, primal=5.0)
+    dual_bound = M["dual"]
+    primal_bound = M["primal"]
+    m.update()
+
+    objective = mm.pv_cost + mm.disutility
+    objective_coefficients = {
+        objective.getVar(i): objective.getCoeff(i)
+        for i in range(objective.size())
+    }
+    posted_price_coefficients = {}
+    for t in mm.T:
+        posted_price_coefficients[mm.var["import"][t]] = x[t]
+        posted_price_coefficients[mm.var["export"][t]] = -x[t]
+
+    # Read every member constraint as (linear row, sense, right-hand side).
+    constraint_rows = []
     for c in mm.con.values():
         for cc in ([c] if isinstance(c, gp.Constr) else c.values()):
-            rows.append((m.getRow(cc), cc.Sense, cc.RHS))
+            constraint_rows.append((m.getRow(cc), cc.Sense, cc.RHS))
 
-    comp, pi = [], []
-    acc = defaultdict(gp.LinExpr)
-    for k, (row, sense, rhs) in enumerate(rows):
+    complementarity_pairs = []
+    equality_and_inequality_multipliers = []
+    multiplier_contribution = defaultdict(gp.LinExpr)
+
+    # Add equality multipliers and inequality multipliers together with their
+    # primal slacks. Inequality multipliers are constrained to be non-negative.
+    for constraint_index, (row, sense, rhs) in enumerate(constraint_rows):
         if sense == "=":
-            p = m.addVar(lb=-D, ub=D, name=f"pi_{tag}_{k}")
+            multiplier = m.addVar(
+                lb=-dual_bound,
+                ub=dual_bound,
+                name=f"pi_{tag}_{constraint_index}",
+            )
         else:
-            lam = m.addVar(lb=0, ub=D, name=f"lam_{tag}_{k}")
-            slack = m.addVar(lb=0, ub=P, name=f"slack_{tag}_{k}")
-            m.addConstr(slack == (rhs - row if sense == "<" else row - rhs))
-            comp.append((lam, slack, D, P))
-            p = lam if sense == "<" else -1.0 * lam
-        pi.append(p)
+            inequality_multiplier = m.addVar(
+                lb=0,
+                ub=dual_bound,
+                name=f"lambda_{tag}_{constraint_index}",
+            )
+            primal_slack = m.addVar(
+                lb=0,
+                ub=primal_bound,
+                name=f"slack_{tag}_{constraint_index}",
+            )
+            if sense == "<":
+                m.addConstr(primal_slack == rhs - row)
+                multiplier = inequality_multiplier
+            else:
+                m.addConstr(primal_slack == row - rhs)
+                multiplier = -inequality_multiplier
+
+            complementarity_pairs.append(
+                (inequality_multiplier, primal_slack, dual_bound, primal_bound)
+            )
+
+        equality_and_inequality_multipliers.append(multiplier)
         for i in range(row.size()):
-            acc[row.getVar(i)] += p * row.getCoeff(i)
+            member_variable = row.getVar(i)
+            multiplier_contribution[member_variable] += (
+                multiplier * row.getCoeff(i)
+            )
 
-    for fam in mm.var.values():
-        for z in fam.values():
-            z.UB = P                                     # redundant bound: every member quantity is < 3.75
-            r = m.addVar(lb=0, ub=D, name=f"r_{tag}")
-            m.addConstr(r == c0.get(z, 0.0) + price.get(z, 0.0) + acc[z])
-            comp.append((r, z, D, P))
+    # Add a reduced cost and an explicit stationarity equation for every
+    # member variable. The reduced-cost/primal-variable pair is complementary.
+    for variable_family_name, variable_family in mm.var.items():
+        for variable_index, member_variable in variable_family.items():
+            member_variable.UB = primal_bound
+            reduced_cost = m.addVar(
+                lb=0,
+                ub=dual_bound,
+                name=f"reduced_cost_{tag}_{variable_family_name}_{variable_index}",
+            )
+            m.addConstr(
+                reduced_cost
+                == objective_coefficients.get(member_variable, 0.0)
+                + posted_price_coefficients.get(member_variable, 0.0)
+                + multiplier_contribution[member_variable]
+            )
+            complementarity_pairs.append(
+                (reduced_cost, member_variable, dual_bound, primal_bound)
+            )
 
-    for a, b, ua, ub in comp:
+    # Linearize each complementarity pair: either a <= 0 or b <= 0.
+    for pair_index, (dual_value, primal_value, dual_bound, primal_bound) in enumerate(
+        complementarity_pairs
+    ):
         if compl == "sos1":
-            m.addSOS(GRB.SOS_TYPE1, [a, b])
-        else:                                      # big-M from the known bounds
-            u = m.addVar(vtype=GRB.BINARY)
-            m.addConstr(a <= ua * u)
-            m.addConstr(b <= ub * (1 - u))
+            m.addSOS(GRB.SOS_TYPE1, [dual_value, primal_value])
+        else:
+            active_dual = m.addVar(
+                vtype=GRB.BINARY,
+                name=f"complementarity_{tag}_{pair_index}",
+            )
+            m.addConstr(dual_value <= dual_bound * active_dual)
+            m.addConstr(primal_value <= primal_bound * (1 - active_dual))
 
-    return dict(dual_cost=-gp.quicksum(p * rhs for p, (_, _, rhs) in zip(pi, rows)))
+    strong_duality_cost = -gp.quicksum(
+        multiplier * rhs
+        for multiplier, (_, _, rhs) in zip(
+            equality_and_inequality_multipliers,
+            constraint_rows,
+        )
+    )
+    return dict(dual_cost=strong_duality_cost)
+
+    #return dict(dual_cost=-gp.quicksum(p * rhs for p, (_, _, rhs) in zip(pi, rows)))
 
 @dataclass
 class Results:
@@ -276,7 +342,8 @@ class Model():
 
     CONTRACTS = ("R", "I", "C", "DP")
 
-    def __init__(self, com, contract="R", verbose=False, compl="bigM", price_bound=None, price_per_member=False, bb="none"):
+    def __init__(self, com, contract="R", verbose=False, compl="bigM", price_bound=None, price_per_member=False, bb="none",
+                 run_name=None):
         if contract not in self.CONTRACTS:
             raise ValueError(f"contract must be one of {self.CONTRACTS}")
         self.com  = com
@@ -284,6 +351,7 @@ class Model():
         self.verbose = verbose
         self.compl = compl
         self.price_bound = price_bound
+        self.run_name = run_name
         self.members: dict[str, MemberModel] = {}
         self.m = None            # joint model (C only)
         self.manager = None      # manager's costs at the connection point (C only)
@@ -355,88 +423,192 @@ class Model():
         grid = gp.quicksum((d0.energy_price[t] + discount * d0.import_tariff) * P_imp[t]
                            - (d0.energy_price[t] - discount * d0.export_tariff) * P_exp[t] for t in T)
         penalty = alpha * gp.quicksum(P_exc[t] for t in T)
-        self.manager_expr = dict(grid=grid, penalty=penalty)
+        self.manager_expr = dict(
+            grid=grid,
+            penalty=penalty,
+        )
         m.setObjective(gp.quicksum(mm.pv_cost + mm.disutility for mm in self.members.values())
                        + grid + penalty, GRB.MINIMIZE)
 
     def _build_DP(self):
+        """Build the single-level MILP for the dynamic-pricing bilevel model.
+
+        The manager chooses hourly posted prices. Each member remains an
+        independent lower-level LP, whose KKT conditions are embedded with
+        add_kkt(). Uniform and member-specific prices are selected by the
+        price_per_member option. Budget balance is optional.
         """
-        Investigate: When the manager controls only the hourly price that all members face, how much of the
-        value and the flexibility achieved by   can be recovered, and which property of the members explains the
-        answer? Can the same hourly prices also redistribute the benefit of the community and allocate costs
-        among its members adequately, such that they are all "happy" to sign the community contract rather than
-        staying alone? And what does this requirement cost the community as a whole? When one uniform price
-        for everybody cannot achieve all this, which members stand in the way?
-        """
-        com, c = self.com, self.com.contract
-        d0, T = com.members[0], range(com.members[0].n_hours)
-        discount, cap = 1.0 - c.tariff_discount_ratio, np.asarray(c.capacity_limit_kW)
+        com = self.com
+        contract = com.contract
+        reference_member = com.members[0]
+        hours = range(reference_member.n_hours)
+        discount = 1.0 - contract.tariff_discount_ratio
+        capacity_limit = np.asarray(contract.capacity_limit_kW)
+
         m = self.m = gp.Model("Q2_DP")
         m.Params.OutputFlag = 1 if self.verbose else 0
-        m.Params.TimeLimit, m.Params.MIPGap = 120, 1e-3 
+        m.Params.TimeLimit = 120
+        m.Params.MIPGap = 1e-3
 
-        # Bounded price X: The internal price x_t is constrained within [-X, X] for all t.
-        X = self.price_bound or (c.penalty_DKK_per_kWh + d0.energy_price.max() + d0.import_tariff)
-        # self.x = x = m.addVars(T, lb=-X, ub=X, name="x")
-        print("price_per_member is", self.price_per_member)
+        # Bound the posted price. The default bound is also usable as a
+        # dual-variable bound in the KKT reformulation.
+        price_bound = self.price_bound or (
+            contract.penalty_DKK_per_kWh
+            + reference_member.energy_price.max()
+            + reference_member.import_tariff
+        )
+
         if self.price_per_member:
-            self.x = {cid: m.addVars(T, lb=-X, ub=X, name=f"x_{cid}") for cid in com.member_ids}   # x[i,t]
+            # One independent 24-hour price vector for each member.
+            self.x = {
+                member_id: m.addVars(
+                    hours,
+                    lb=-price_bound,
+                    ub=price_bound,
+                    name=f"posted_price_{member_id}",
+                )
+                for member_id in com.member_ids
+            }
         else:
-            xu = m.addVars(T, lb=-X, ub=X, name="x")                    # ONE price vector...
-            self.x = {cid: xu for cid in com.member_ids}                # ...shared by every member
+            # One shared 24-hour price vector for the whole community.
+            shared_prices = m.addVars(
+                hours,
+                lb=-price_bound,
+                ub=price_bound,
+                name="posted_price",
+            )
+            self.x = {
+                member_id: shared_prices
+                for member_id in com.member_ids
+            }
 
-        # Gurobi can’t take an “argmin of another optimization problem” as a constraint for the members.
-        # You have to replace the lower level with equations and inequalities that hold exactly when q is 
-        # optimal for the member’s LP.
+        # Replace each member's LP by its primal, dual, stationarity,
+        # and complementarity constraints.
         self.kkt = {}
-        M = dict(dual=X + 5, primal=5.0)
+        kkt_bounds = dict(dual=price_bound + 5, primal=5.0)
         for member in com.members:
-            mm = MemberModel(member, model=m, grid=False).build()
-            self.members[member.consumer_id] = mm
-            # self.kkt[member.consumer_id] = add_kkt(m, mm, x, member.consumer_id, self.compl, M)
-            self.kkt[member.consumer_id] = add_kkt(m, mm, self.x[member.consumer_id], member.consumer_id, self.compl, M)
+            member_model = MemberModel(
+                member,
+                model=m,
+                grid=False,
+            ).build()
+            member_id = member.consumer_id
+            self.members[member_id] = member_model
+            self.kkt[member_id] = add_kkt(
+                m,
+                member_model,
+                self.x[member_id],
+                member_id,
+                self.compl,
+                kkt_bounds,
+            )
 
+        # Community meter flows and capacity-exceedance variable.
+        community_import = m.addVars(hours, lb=0, name="community_import")
+        community_export = m.addVars(hours, lb=0, name="community_export")
+        community_exceedance = m.addVars(hours, lb=0, name="community_exceedance")
+        self.P = dict(
+            imp=community_import,
+            exp=community_export,
+            exc=community_exceedance,
+        )
 
-        P_imp = m.addVars(T, lb=0, name="P_imp")                   # meter: physical balance, not a price
-        P_exp = m.addVars(T, lb=0, name="P_exp")
-        P_exc = m.addVars(T, lb=0, name="P_exc")
-        self.P = dict(imp=P_imp, exp=P_exp, exc=P_exc)
-        m.addConstrs((gp.quicksum(mm.var["import"][t] - mm.var["export"][t] for mm in self.members.values())
-                      == P_imp[t] - P_exp[t] for t in T), name="meter_balance")
-        m.addConstrs((P_exc[t] >= P_imp[t] - cap[t] for t in T), name="P_exc_def")
+        m.addConstrs(
+            (
+                gp.quicksum(
+                    member_model.var["import"][t]
+                    - member_model.var["export"][t]
+                    for member_model in self.members.values()
+                )
+                == community_import[t] - community_export[t]
+                for t in hours
+            ),
+            name="meter_balance",
+        )
+        m.addConstrs(
+            (
+                community_exceedance[t]
+                >= community_import[t] - capacity_limit[t]
+                for t in hours
+            ),
+            name="community_exceedance",
+        )
 
-        grid = gp.quicksum((d0.energy_price[t] + discount * d0.import_tariff) * P_imp[t]
-                           - (d0.energy_price[t] - discount * d0.export_tariff) * P_exp[t] for t in T)
-        penalty = c.penalty_DKK_per_kWh * gp.quicksum(P_exc[t] for t in T)
-        self.manager_expr = dict(grid=grid, penalty=penalty)
+        grid_cost = gp.quicksum(
+            (
+                reference_member.energy_price[t]
+                + discount * reference_member.import_tariff
+            ) * community_import[t]
+            - (
+                reference_member.energy_price[t]
+                - discount * reference_member.export_tariff
+            ) * community_export[t]
+            for t in hours
+        )
+        exceedance_cost = contract.penalty_DKK_per_kWh * gp.quicksum(
+            community_exceedance[t] for t in hours
+        )
+        self.manager_expr = dict(
+            grid=grid_cost,
+            penalty=exceedance_cost,
+        )
 
-        # payments by strong duality: member cost = payment + pv + disutility = dual_cost
-        self.pay = {cid: self.kkt[cid]["dual_cost"] - mm.pv_cost - mm.disutility
-                    for cid, mm in self.members.items()}
-        self.budget = gp.quicksum(self.pay.values()) - (grid + penalty)   # manager's budget (step 2: == 0)
+        # Strong duality gives each member payment as:
+        # payment = dual cost - PV cost - disutility.
+        self.pay = {
+            member_id: (
+                self.kkt[member_id]["dual_cost"]
+                - member_model.pv_cost
+                - member_model.disutility
+            )
+            for member_id, member_model in self.members.items()
+        }
+        self.budget = (
+            gp.quicksum(self.pay.values())
+            - (grid_cost + exceedance_cost)
+        )
 
-        cost = gp.quicksum(mm.pv_cost + mm.disutility for mm in self.members.values()) + grid + penalty
+        community_objective = (
+            gp.quicksum(
+                member_model.pv_cost + member_model.disutility
+                for member_model in self.members.values()
+            )
+            + grid_cost
+            + exceedance_cost
+        )
 
-        if self.bb == "eq":                                   # budget balance: members pay exactly what the manager owes the DSO
-            m.addConstr(self.budget == 0, name="budget_balance")
+        if self.bb == "eq":
+            m.addConstr(
+                self.budget == 0,
+                name="budget_balance",
+            )
 
-        m.setObjective(cost, GRB.MINIMIZE)
+        m.setObjective(community_objective, GRB.MINIMIZE)
 
-        # C is a relaxation of DP, so cost(DP) >= cost(C): a valid cut, and C's dispatch is a feasible start
-        resC = Model(self.com, "C").build().solve()
-        m.addConstr(cost >= resC.objective - 1e-4, name="lower_bound_from_C")
-        xs = np.clip(-resC.hourly["internal_price_dual"].to_numpy(), -X, X)    # posted price = - dual of C's balance
-        for t in T:
-            # self.x[t].Start = xs[t]
-            for cid in com.member_ids:
-                    self.x[cid][t].Start = xs[t]       # C's uniform price is feasible for discriminatory prices too
-            P_imp[t].Start = resC.hourly["import"].iloc[t]
-            P_exp[t].Start = resC.hourly["export"].iloc[t]
-        for cid, mm in self.members.items():
-            s = resC.meta["solutions"][cid]
-            for name, fam in mm.var.items():
-                for t in T:
-                    fam[t].Start = s[name][t]
+        # Model C is a relaxation of DP. Its objective therefore provides a
+        # valid lower bound and a useful feasible starting solution.
+        centralized_solution = Model(self.com, "C").build().solve()
+        m.addConstr(
+            community_objective >= centralized_solution.objective - 1e-4,
+            name="lower_bound_from_centralized_model",
+        )
+
+        central_posted_prices = np.clip(
+            -centralized_solution.hourly["internal_price_dual"].to_numpy(),
+            -price_bound,
+            price_bound,
+        )
+        for t in hours:
+            for member_id in com.member_ids:
+                self.x[member_id][t].Start = central_posted_prices[t]
+            community_import[t].Start = centralized_solution.hourly["import"].iloc[t]
+            community_export[t].Start = centralized_solution.hourly["export"].iloc[t]
+
+        for member_id, member_model in self.members.items():
+            centralized_member = centralized_solution.meta["solutions"][member_id]
+            for variable_name, variable_family in member_model.var.items():
+                for t in hours:
+                    variable_family[t].Start = centralized_member[variable_name][t]
 
 
 
@@ -527,7 +699,8 @@ class Model():
         if self.contract == "DP":
             metrics["manager_budget_DKK"] = self.budget.getValue()
         question_prefix = "Q1" if self.contract in ("R", "I", "C") else "Q2"
-        return Results(question=f"{question_prefix}_{self.contract}", status="OPTIMAL",
+        question = self.run_name if self.run_name is not None else f"{question_prefix}_{self.contract}"
+        return Results(question=question, status="OPTIMAL",
                        objective=metrics["total_cost_DKK"], hourly=hourly,
                        meta=dict(metrics=metrics, members=members, schedules=schedules, solutions=sol, prices=prices if self.contract == "DP" else None))
 

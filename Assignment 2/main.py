@@ -85,18 +85,18 @@ def run_Q2_sensitivity(com, out: Path,) -> None:
     plot.plot_dp_sweep(table, experiments, out, "Q2_sensitivity")
     print(table.round(2).to_string(index=False))
 
-def _build_and_run_model(com, out: Path, model_type: str) -> Results:
+def _build_and_run_model(com, out: Path, model_type: str, run_name: str) -> Results:
     if model_type == "DP_dis":
         print("Running DP with price per member")
-        model = Model(com, "DP", price_per_member=True)
+        model = Model(com, "DP", price_per_member=True, run_name=run_name)
     elif model_type == "DP_bb":
         print("Running DP with budget balance")
-        model = Model(com, "DP", bb="eq")
+        model = Model(com, "DP", bb="eq", run_name=run_name)
     elif model_type == "DP_disbb":
         print("Running DP with price per member and budget balance")
-        model = Model(com, "DP", price_per_member=True, bb="eq")
+        model = Model(com, "DP", price_per_member=True, bb="eq", run_name=run_name)
     else:
-        model = Model(com, model_type)
+        model = Model(com, model_type, run_name=run_name)
     model.build()
     if model_type in ("DP_bb", "DP_disbb"):
         print(model.m.getConstrByName("budget_balance"))
@@ -152,7 +152,7 @@ def main() -> None:
         elif args.model == "Q2_sens":
             run_Q2_sensitivity(com, out)
         else:
-            _build_and_run_model(com, out, MODEL[args.model])
+            _build_and_run_model(com, out, MODEL[args.model], args.model)
         return
     
     print(com.summary(), "\n")
